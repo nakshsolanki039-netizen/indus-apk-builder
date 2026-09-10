@@ -5,21 +5,24 @@ on:
     inputs:
       appName:
         description: 'App Name'
-        required: true
+        required: false
         default: 'IndusApp'
       pkgName:
         description: 'Package Name'
-        required: true
+        required: false
         default: 'com.indus.app'
       htmlContentBase64:
         description: 'Base64 Encoded HTML File'
-        required: true
+        required: false
+        default: 'PGgxPkluZHVzSHRtbCBBcHA8L2gxPg=='
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
       CI: true
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout Code
@@ -31,36 +34,38 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK & Accept All Licenses
-        uses: android-actions/setup-android@v3
-
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Setup Capacitor & Safely Inject Code
+      - name: Build Native Android Project
         run: |
-          # 1. Clean package name
+          # 1. Sanitize Package Name
           RAW_PKG="${{ github.event.inputs.pkgName }}"
           CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
-          if [[ "$CLEAN_PKG" != *.* ]]; then
-            CLEAN_PKG="com.indus.${CLEAN_PKG}"
+          if [[ "$CLEAN_PKG" != *.* ]] || [ -z "$CLEAN_PKG" ]; then
+            CLEAN_PKG="com.indus.app"
           fi
 
-          # 2. Init Node project
-          npm init -y
-          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
+          RAW_NAME="${{ github.event.inputs.appName }}"
+          if [ -z "$RAW_NAME" ]; then
+            RAW_NAME="IndusApp"
+          fi
 
-          # 3. Create folder
+          # 2. Setup Stable Capacitor 6
+          npm init -y
+          npm install @capacitor/core@6.0.0 @capacitor/cli@6.0.0 @capacitor/android@6.0.0
+
+          # 3. Create Web Directory
           mkdir -p www
 
-          # 4. Safely inject Config & HTML using Node.js (Handles all spaces, quotes & special characters)
+          # 4. Safely write config & HTML with fallback protection
           node -e '
           const fs = require("fs");
           const appId = process.argv[1];
           const appName = process.argv[2];
-          const b64 = process.argv[3];
+          const b64 = process.argv[3] || "PGgxPkluZHVzSHRtbCBBcHA8L2gxPg==";
           
           fs.writeFileSync("capacitor.config.json", JSON.stringify({
             appId: appId,
@@ -68,20 +73,24 @@ jobs:
             webDir: "www"
           }, null, 2));
 
-          fs.writeFileSync("www/index.html", Buffer.from(b64, "base64").toString("utf-8"));
-          ' "$CLEAN_PKG" "${{ github.event.inputs.appName }}" "${{ github.event.inputs.htmlContentBase64 }}"
+          let html = "<h1>IndusHtml App</h1>";
+          try {
+            html = Buffer.from(b64, "base64").toString("utf-8");
+          } catch(e) {}
+          fs.writeFileSync("www/index.html", html);
+          ' "$CLEAN_PKG" "$RAW_NAME" "${{ github.event.inputs.htmlContentBase64 }}"
 
-          # 5. Add Android native platform
+          # 5. Add Android Platform
           npx cap add android
 
       - name: Compile APK via Gradle
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx2048m"
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.appName }}-APK
+          name: ${{ github.event.inputs.appName || 'IndusApp' }}-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
