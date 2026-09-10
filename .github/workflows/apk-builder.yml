@@ -1,0 +1,53 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      appName:
+        description: 'App Name'
+        required: true
+        default: 'IndusApp'
+      pkgName:
+        description: 'Package Name'
+        required: true
+        default: 'com.indus.app'
+      htmlContentBase64:
+        description: 'Base64 Encoded HTML File'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Cordova
+        run: npm install -g cordova
+
+      - name: Create App & Inject Code
+        run: |
+          cordova create app "${{ github.event.inputs.pkgName }}" "${{ github.event.inputs.appName }}"
+          cd app
+          cordova platform add android
+          rm -rf www/*
+          echo "${{ github.event.inputs.htmlContentBase64 }}" | base64 --decode > www/index.html
+
+      - name: Build Android APK
+        run: |
+          cd app
+          cordova build android
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ github.event.inputs.appName }}-APK
+          path: app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
