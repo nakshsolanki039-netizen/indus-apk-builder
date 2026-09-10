@@ -18,37 +18,35 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Fix Permissions & Accept Android Licenses
+      - name: Setup Android Environment
         run: |
-          sudo chown -R $USER:$USER $ANDROID_HOME
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          sudo chown -R $USER:$USER /usr/local/lib/android/sdk
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Install Cordova
         run: |
           npm install -g cordova
           cordova telemetry off
 
-      - name: Generate App Project
+      - name: Build App Project
         run: |
+          # Sanitize Package
           RAW_PKG="${{ github.event.inputs.pkgName }}"
           CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
           if [[ "$CLEAN_PKG" != *.* ]]; then
@@ -68,35 +66,6 @@ jobs:
           cordova build android --debug
 
       - name: Upload Finished APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.appName }}-APK
-          path: myapp/platforms/android/app/build/outputs/apk/debug/app-debug.apk        run: |
-          npm install -g cordova
-          cordova telemetry off
-          yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Create App & Inject HTML
-        run: |
-          RAW_PKG="${{ github.event.inputs.pkgName }}"
-          CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
-          if [[ "$CLEAN_PKG" != *.* ]]; then
-            CLEAN_PKG="com.indus.${CLEAN_PKG}"
-          fi
-
-          cordova create myapp "$CLEAN_PKG" "${{ github.event.inputs.appName }}"
-          cd myapp
-          cordova platform add android
-
-          rm -rf www/*
-          echo "${{ github.event.inputs.htmlContentBase64 }}" | base64 --decode > www/index.html
-
-      - name: Build Android Debug APK
-        run: |
-          cd myapp
-          cordova build android --debug
-
-      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.appName }}-APK
