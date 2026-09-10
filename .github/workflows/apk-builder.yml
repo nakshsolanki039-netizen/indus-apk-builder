@@ -34,39 +34,35 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Android Environment
+      - name: Create Native Android Project & Inject HTML
         run: |
-          sudo chown -R $USER:$USER /usr/local/lib/android/sdk
-          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Install Cordova
-        run: |
-          npm install -g cordova
-          cordova telemetry off
-
-      - name: Build App Project
-        run: |
-          # Sanitize Package
+          # Sanitize Package Name
           RAW_PKG="${{ github.event.inputs.pkgName }}"
           CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
           if [[ "$CLEAN_PKG" != *.* ]]; then
             CLEAN_PKG="com.indus.${CLEAN_PKG}"
           fi
 
-          cordova create myapp "$CLEAN_PKG" "${{ github.event.inputs.appName }}"
-          cd myapp
-          cordova platform add android@12.0.1 --save
+          # Install Capacitor
+          npm init -y
+          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
 
-          rm -rf www/*
+          # Create web directory and decode HTML
+          mkdir -p www
           echo "${{ github.event.inputs.htmlContentBase64 }}" | base64 --decode > www/index.html
 
-      - name: Compile APK
+          # Initialize Capacitor Android App
+          npx cap init "${{ github.event.inputs.appName }}" "$CLEAN_PKG" --web-dir www
+          npx cap add android
+
+      - name: Compile APK via Android Gradle
         run: |
-          cd myapp
-          cordova build android --debug
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.appName }}-APK
-          path: myapp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
