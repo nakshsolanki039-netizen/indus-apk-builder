@@ -31,41 +31,51 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Android SDK & Accept All Licenses
+        uses: android-actions/setup-android@v3
+
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Setup & Build Android APK
+      - name: Setup Capacitor & Safely Inject Code
         run: |
-          # Sanitize Package Name
+          # 1. Clean package name
           RAW_PKG="${{ github.event.inputs.pkgName }}"
           CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
           if [[ "$CLEAN_PKG" != *.* ]]; then
             CLEAN_PKG="com.indus.${CLEAN_PKG}"
           fi
 
-          # 1. Install Capacitor Packages
+          # 2. Init Node project
           npm init -y
           npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
 
-          # 2. Write Config File directly (bypasses all interactive prompt freezes)
-          cat <<EOF > capacitor.config.json
-          {
-            "appId": "$CLEAN_PKG",
-            "appName": "${{ github.event.inputs.appName }}",
-            "webDir": "www"
-          }
-          EOF
-
-          # 3. Create Web directory & Inject Code
+          # 3. Create folder
           mkdir -p www
-          echo "${{ github.event.inputs.htmlContentBase64 }}" | base64 --decode > www/index.html
 
-          # 4. Generate Native Android Project
+          # 4. Safely inject Config & HTML using Node.js (Handles all spaces, quotes & special characters)
+          node -e '
+          const fs = require("fs");
+          const appId = process.argv[1];
+          const appName = process.argv[2];
+          const b64 = process.argv[3];
+          
+          fs.writeFileSync("capacitor.config.json", JSON.stringify({
+            appId: appId,
+            appName: appName,
+            webDir: "www"
+          }, null, 2));
+
+          fs.writeFileSync("www/index.html", Buffer.from(b64, "base64").toString("utf-8"));
+          ' "$CLEAN_PKG" "${{ github.event.inputs.appName }}" "${{ github.event.inputs.htmlContentBase64 }}"
+
+          # 5. Add Android native platform
           npx cap add android
 
-          # 5. Compile APK without background daemon
+      - name: Compile APK via Gradle
+        run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
