@@ -18,6 +18,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CI: true
 
     steps:
       - name: Checkout Code
@@ -34,7 +36,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Create Native Android Project & Inject HTML
+      - name: Setup & Build Android APK
         run: |
           # Sanitize Package Name
           RAW_PKG="${{ github.event.inputs.pkgName }}"
@@ -43,23 +45,30 @@ jobs:
             CLEAN_PKG="com.indus.${CLEAN_PKG}"
           fi
 
-          # Install Capacitor
+          # 1. Install Capacitor Packages
           npm init -y
           npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
 
-          # Create web directory and decode HTML
+          # 2. Write Config File directly (bypasses all interactive prompt freezes)
+          cat <<EOF > capacitor.config.json
+          {
+            "appId": "$CLEAN_PKG",
+            "appName": "${{ github.event.inputs.appName }}",
+            "webDir": "www"
+          }
+          EOF
+
+          # 3. Create Web directory & Inject Code
           mkdir -p www
           echo "${{ github.event.inputs.htmlContentBase64 }}" | base64 --decode > www/index.html
 
-          # Initialize Capacitor Android App
-          npx cap init "${{ github.event.inputs.appName }}" "$CLEAN_PKG" --web-dir www
+          # 4. Generate Native Android Project
           npx cap add android
 
-      - name: Compile APK via Android Gradle
-        run: |
+          # 5. Compile APK without background daemon
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
