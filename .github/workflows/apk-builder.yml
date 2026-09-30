@@ -16,6 +16,9 @@ on:
         required: false
         default: 'PGgxPkluZHVzSHRtbCBBcHA8L2gxPg=='
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,7 +44,6 @@ jobs:
 
       - name: Build Native Android Project
         run: |
-          # 1. Sanitize Package Name
           RAW_PKG="${{ github.event.inputs.pkgName }}"
           CLEAN_PKG=$(echo "$RAW_PKG" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._')
           if [[ "$CLEAN_PKG" != *.* ]] || [ -z "$CLEAN_PKG" ]; then
@@ -53,14 +55,11 @@ jobs:
             RAW_NAME="IndusApp"
           fi
 
-          # 2. Setup Stable Capacitor 6
           npm init -y
           npm install @capacitor/core@6.0.0 @capacitor/cli@6.0.0 @capacitor/android@6.0.0
 
-          # 3. Create Web Directory
           mkdir -p www
 
-          # 4. Safely write config & HTML with fallback protection
           node -e '
           const fs = require("fs");
           const appId = process.argv[1];
@@ -80,7 +79,6 @@ jobs:
           fs.writeFileSync("www/index.html", html);
           ' "$CLEAN_PKG" "$RAW_NAME" "${{ github.event.inputs.htmlContentBase64 }}"
 
-          # 5. Add Android Platform
           npx cap add android
 
       - name: Compile APK via Gradle
@@ -89,8 +87,37 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx2048m"
 
-      - name: Upload Finished APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.appName || 'IndusApp' }}-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish Dedicated App Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RAW_NAME="${{ github.event.inputs.appName || 'IndusApp' }}"
+          
+          # Clean name for tag (lowercase, alphanumeric)
+          SAFE_TAG_NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+          if [ -z "$SAFE_TAG_NAME" ]; then
+            SAFE_TAG_NAME="indusapp"
+          fi
+
+          # Clean filename for the APK
+          APK_NAME=$(echo "$RAW_NAME" | tr -cd 'a-zA-Z0-9_-')
+          if [ -z "$APK_NAME" ]; then
+            APK_NAME="IndusApp"
+          fi
+          APK_FILENAME="${APK_NAME}.apk"
+
+          # Copy and rename APK
+          cp android/app/build/outputs/apk/debug/app-debug.apk "./$APK_FILENAME"
+
+          # Unique Release Tag per App: release-appname-build#
+          RELEASE_TAG="release-${SAFE_TAG_NAME}-${{ github.run_number }}"
+
+          # Create custom public release
+          gh release create "$RELEASE_TAG" "./$APK_FILENAME" \
+            --title "🚀 $RAW_NAME (Build #${{ github.run_number }})" \
+            --notes "### 📱 Download $RAW_NAME APK
+          * **App Name:** $RAW_NAME
+          * **Package ID:** ${{ github.event.inputs.pkgName || 'com.indus.app' }}
+          * **Build Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          👇 **Tap the .apk file below to download and install immediately!**"
